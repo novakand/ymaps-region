@@ -1,4 +1,6 @@
 import { YMapsAPILoader } from './ymaps-api-loader.js';
+import { YMapsLibLoader } from './ymaps-lib-loader.js';
+import { libConfig } from '../constants/lib-config.constant.js';
 
 export class YMapsMapService {
 
@@ -17,12 +19,22 @@ export class YMapsMapService {
 
     _apiLoader(htmlElement, options) {
         return new Promise((resolve, reject) => {
-            this.loader.load().then(() => {
+            this.loader.load().then(async () => {
                 this._maps = this._createMap(htmlElement, options);
+                this.loadModules();
                 this._setBackgroundContainerMap();
                 resolve(this._maps);
             }).catch((error) => error);
         });
+    }
+
+    async loadModules() {
+        new YMapsLibLoader(libConfig.calculateArea)
+            .load()
+            .then(async () => {
+                await new YMapsLibLoader(libConfig.polylabeler).load();
+                ymaps.ready(['polylabel.create']);
+            });
     }
 
     _createMap(htmlElement, options) {
