@@ -5,13 +5,16 @@ import { mapOptions as options } from './modules/ymaps/constants/map-options.con
 import { GapiService } from './modules/sheets/services/gapi.service.js';
 import { default as objectManagerOptions } from './modules/ymaps/constants/map-object-manager-options.js';
 import { default as uId } from './modules/ymaps/constants/unique-number.constants.js';
+import { headerSheets } from './modules/sheets/constants/name-headers-sheet.constant.js';
+import { fitBoundsOpts } from './modules/ymaps/constants/fitbounds.constant.js';
+import { default as listBoxoptions } from './modules/ymaps/constants/list-box-options.constant.js';
 
 let gapiService;
 let map;
 let mapService;
 let objectManager;
-let geocoder;
 let boundaries;
+let isVisibleFeature = true;
 
 async function onInit() {
     onInitYmapsAPI();
@@ -80,13 +83,26 @@ async function buildRows() {
     data?.forEach((sheet) => sheet && buildRow(sheet));
 }
 
+
 function buildRow(sheet) {
     getRows(sheet)
         .then((data) => {
-            buildPoints({ ...data, sheet }, true)
-                .then((collection) => { });
-            onPreloader(false);
+            buildPoints({ ...data, sheet })
+                .then(() => {
+                    setFilter(data)
+                        .then((filter) =>
+                            addFilter(Object.keys(filter)));
+                    delay(1000)
+                        .then(() => {
+                            onPreloader(false);
+                            fitBounds();
+                        })
+                });
         });
+}
+
+function fitBounds() {
+    map.geoObjects.getBounds() && map.setBounds(map.geoObjects.getBounds(), fitBoundsOpts);
 }
 
 function buildPoints(data) {
@@ -103,12 +119,12 @@ function buildPoint(point) {
         id: uId(),
         geometry: {
             type: 'Point',
-            coordinates: point['Координаты']?.split(',')?.map(parseFloat)
+            coordinates: point[headerSheets.coordinates]?.split(',')?.map(parseFloat)
         },
         properties: {
             ...point,
             balloonContentHeader: `<div>${point['Адрес']}</div>`,
-            balloonContentBody: `<div>Избирательный округ № ${point['Номер округа']}</div><div>Тип дома: ${point['Тип дома']}</div><div>Координаты: ${point['Координаты']}</div>`,
+            balloonContentBody: `<div>Избирательный округ № ${point[headerSheets.сountyNumber]}</div><div>Тип дома: ${point[headerSheets.filterCategory]} ${point[headerSheets.stateHouse] ? '(' + point[headerSheets.stateHouse] + ')' : ''}</div><div>Количество помещений (жилых/нежилых): ${point[headerSheets.numberResidentialPremises] || '-'}/${point[headerSheets.numberNonResidentialPremises] || '-'}</div><div>Этажей: ${point['Количество этажей'] || '-'}</div><div>Подъездов: ${point[headerSheets.numberEntrances] || '-'}</div><div>Координаты: ${point[headerSheets.coordinates]}</div>`,
         },
         options: {
             iconLayout: "default#image",
@@ -121,11 +137,53 @@ function buildPoint(point) {
 function isCoord(data) {
     return data?.allRows
         .map((point) => ({ ...point, sheet: data.sheet }))
-        .filter(item => item['Координаты']);
+        .filter(item => item[headerSheets.coordinates]);
 }
 
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function setFilter(data) {
+    return new Promise((resolve, reject) => {
+        const filter = data?.allRows
+            .reduce((result, feature) => { return { ...result, [feature[headerSheets.filterCategory]]: isVisibleFeature } }, {});
+        resolve(filter)
+    })
+}
+
+function addFilter(data) {
+    const listBoxItems = data
+        .map((title) => {
+            return new ymaps.control.ListBoxItem({ data: { content: title }, state: { selected: true } })
+        });
+
+    const reducer = (filters, filter) => {
+        filters[filter.data.get('content')] = filter.isSelected();
+        return filters;
+    };
+
+    const listBoxControl = new ymaps.control.ListBox(listBoxoptions(listBoxItems, reducer));
+    map.controls.add(listBoxControl, { float: 'right' });
+
+    listBoxControl.events.add(['select', 'deselect'], (event) => {
+        const listBoxItem = event.get('target');
+        const filters = ymaps.util.extend({}, listBoxControl.state.get('filters'));
+        filters[listBoxItem.data.get('content')] = listBoxItem.isSelected();
+        listBoxControl.state.set('filters', filters);
+    });
+
+    const filterMonitor = new ymaps.Monitor(listBoxControl.state);
+    filterMonitor.add('filters', (filters) => {
+        objectManager.setFilter(getFilterFunction(filters));
+    });
+}
+
+function getFilterFunction(categories) {
+    return (geoObject) => {
+        var content = geoObject.properties[headerSheets.filterCategory];
+        return categories[content]
+    }
 }
 
 document.addEventListener('DOMContentLoaded', onInit);
