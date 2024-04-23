@@ -18,7 +18,7 @@ let isVisibleFeature = true;
 
 async function onInit() {
     onInitYmapsAPI();
-    onInitGap();
+    //onInitGap();
 }
 
 async function onInitYmapsAPI() {
@@ -31,8 +31,18 @@ async function onInitYmapsAPI() {
         objectManager = new ymaps.ObjectManager(objectManagerOptions());
         map.geoObjects.add(objectManager);
         delay(500).then(() => addBoundaries());
+        delay(1000).then(() => addPoints());
         document.querySelector('#map').setAttribute('data-load', true);
     });
+}
+
+async function addPoints() {
+    const data = await getDataPoints();
+    objectManager?.add(data);
+    setFilterCollection(data)
+        .then((filter) =>
+            addFilter(Object.keys(filter)));
+    onPreloader(false);
 }
 
 async function addBoundaries() {
@@ -49,6 +59,12 @@ async function getData() {
     const response = await fetch('./data-storage/districts.json?cache=1');
     const data = await response.json();
     data.features.forEach((feature) => reverse(feature.geometry.coordinates[0]));
+    return data;
+}
+
+async function getDataPoints() {
+    const response = await fetch('./data-storage/data-points.json?cache=1');
+    const data = await response.json();
     return data;
 }
 
@@ -142,6 +158,14 @@ function isCoord(data) {
 
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function setFilterCollection(data) {
+    return new Promise((resolve, reject) => {
+        const filter = data?.features
+            .reduce((result, feature) => { return { ...result, [feature.properties[headerSheets.filterCategory]]: isVisibleFeature } }, {});
+        resolve(filter)
+    })
 }
 
 function setFilter(data) {
