@@ -8,6 +8,7 @@ import { default as uId } from './modules/ymaps/constants/unique-number.constant
 import { headerSheets } from './modules/sheets/constants/name-headers-sheet.constant.js';
 import { fitBoundsOpts } from './modules/ymaps/constants/fitbounds.constant.js';
 import { default as listBoxoptions } from './modules/ymaps/constants/list-box-options.constant.js';
+import { default as listBoxoptionsVer } from './modules/ymaps/constants/list-box-options-version.constant.js';
 
 let gapiService;
 let map;
@@ -15,6 +16,7 @@ let mapService;
 let objectManager;
 let boundaries;
 let isVisibleFeature = true;
+let polyLabel;
 
 async function onInit() {
     onInitYmapsAPI();
@@ -31,39 +33,46 @@ async function onInitYmapsAPI() {
         objectManager = new ymaps.ObjectManager(objectManagerOptions());
         map.geoObjects.add(objectManager);
         delay(500).then(() => addBoundaries());
-        delay(1000).then(() => addPoints());
+        delay(1000).then(() => addPoints().then((data) => {
+            setFilterCollection(data)
+                .then((filter) =>
+                    addFilter(Object.keys(filter)));
+            onPreloader(false);
+            addVersionChange();
+        }));
         document.querySelector('#map').setAttribute('data-load', true);
     });
 }
 
-async function addPoints() {
-    const data = await getDataPoints();
-    objectManager?.add(data);
-    setFilterCollection(data)
-        .then((filter) =>
-            addFilter(Object.keys(filter)));
-    onPreloader(false);
+async function addPoints(type = 2) {
+    return new Promise(async (resolve, reject) => {
+        const data = await getDataPoints(type);
+        objectManager?.add(data);
+        resolve(data)
+    })
 }
 
-async function addBoundaries() {
-    const data = await getData();
+async function addBoundaries(type = 2) {
+    const data = await getData(type);
     boundaries = ymaps.geoQuery(data).addToMap(map);
-    new ymaps.polylabel.create(map, boundaries);
+    polyLabel = new ymaps.polylabel.create(map, boundaries);
 }
 
 function reverse(data) {
     data?.forEach((coordinates) => coordinates.reverse());
 }
 
-async function getData() {
-    const response = await fetch('./data-storage/districts.json?cache=1');
+async function getData(type = 2) {
+    const url = `./data-storage/districts${type == 1 ? '' : '2'}.json`
+    const response = await fetch(url);
     const data = await response.json();
     data.features.forEach((feature) => reverse(feature.geometry.coordinates[0]));
     return data;
 }
 
-async function getDataPoints() {
-    const response = await fetch('./data-storage/data-points.json?cache=1');
+async function getDataPoints(type = 2) {
+    const url = `./data-storage/data-points${type == 1 ? '' : '2'}.json`
+    const response = await fetch(url);
     const data = await response.json();
     return data;
 }
@@ -174,6 +183,39 @@ function setFilter(data) {
             .reduce((result, feature) => { return { ...result, [feature[headerSheets.filterCategory]]: isVisibleFeature } }, {});
         resolve(filter)
     })
+}
+
+function addVersionChange() {
+    const listBoxItems = ['ver1', 'ver2']
+        .map((title) => {
+            return new ymaps.control.ListBoxItem({ data: { content: title }, state: { selected: title === 'ver1' ? false : true } })
+        });
+
+    const reducer = (filters, filter) => {
+        filters[filter.data.get('content')] = filter.isSelected();
+        return filters;
+    };
+
+    const listBoxControl = new ymaps.control.ListBox(listBoxoptionsVer(listBoxItems, reducer));
+    map.controls.add(listBoxControl, { float: 'right' });
+
+    listBoxControl.events.add('select', (event) => {
+        onPreloader(true)
+        const listBoxItem = event.get('target');
+        const listBoxItemUn = listBoxControl.getAll()
+            .filter((item) => item.data.get('content') !== listBoxItem.data.get('content'));
+        listBoxItemUn[0].state.set('selected', false);
+        const type = listBoxItem.data.get('content');
+        delay(100).then(() => addBoundaries(type === 'ver2' ? '' : 1));
+        delay(200).then(() => addPoints(type === 'ver2' ? '' : 1).then(() => onPreloader(false)));
+    });
+
+
+    listBoxControl.events.add('deselect', (event) => {
+        boundaries.removeFromMap(map);
+        objectManager.removeAll();
+        polyLabel._labelsCollection.removeAll();
+    });
 }
 
 function addFilter(data) {
